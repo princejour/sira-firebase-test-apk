@@ -1,0 +1,72 @@
+name: Build Firebase Test APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare project
+        run: |
+          set -e
+
+          SEARCH_ROOT="$GITHUB_WORKSPACE"
+
+          ZIP_FILE="$(find "$GITHUB_WORKSPACE" -type f -name '*.zip' -not -path '*/.git/*' | head -n 1 || true)"
+
+          if [ -n "$ZIP_FILE" ]; then
+            echo "ZIP found: $ZIP_FILE"
+            mkdir -p "$GITHUB_WORKSPACE/extracted"
+            unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/extracted"
+            SEARCH_ROOT="$GITHUB_WORKSPACE/extracted"
+          else
+            echo "No ZIP found, searching directly in repository."
+          fi
+
+          PROJECT_FILE="$(find "$SEARCH_ROOT" -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) | head -n 1 || true)"
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: settings.gradle not found."
+            find "$SEARCH_ROOT" -maxdepth 5 -type f | sed -n '1,160p'
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PROJECT_FILE")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Gradle project found in: $PROJECT_DIR"
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.10.2
+
+      - name: Build APK
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug
+          else
+            gradle assembleDebug
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sira-firebase-test-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/**/*.apk
